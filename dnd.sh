@@ -4,24 +4,24 @@
 FILE_PATH="/home/anandan/Desktop/1.jpeg"
 
 # Coordinates of the file on your desktop (starting position for the drag)
-START_X=60
-START_Y=35
+START_X=180
+START_Y=200
 
 # Coordinates of the drop zone in the browser window
 DROP_X=535
 DROP_Y=385
 
-# Find the Chrome browser window (assuming only one Chrome window is open)
-WINDOW_ID=$(xdotool search --onlyvisible --name "Chrome" | head -n 1)
+# # Find the Chrome browser window (assuming only one Chrome window is open)
+# WINDOW_ID=$(xdotool search --onlyvisible --name "Chrome" | head -n 1)
 
-# If no window found, exit the script
-if [ -z "$WINDOW_ID" ]; then
-  echo "Chrome browser window not found!"
-  exit 1
-fi
+# # If no window found, exit the script
+# if [ -z "$WINDOW_ID" ]; then
+#   echo "Chrome browser window not found!"
+#   exit 1
+# fi
 
 # Activate the browser window
-xdotool windowactivate $WINDOW_ID
+# xdotool windowactivate $WINDOW_ID
 
 # Move the mouse to the starting point (the file on the desktop)
 echo "Moving mouse to starting point: ($START_X, $START_Y)"

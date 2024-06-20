@@ -15,6 +15,7 @@
     "fs-extra": "^11.2.0",
     "googleapis": "^140.0.0",
     "image-to-base64": "^2.2.0",
+    "robotjs": "^0.6.0",
     "sharp": "^0.33.4"
   }
 }
