@@ -1,7 +1,6 @@
 const fs = require('fs');
 let entries;
-fs.readFile("/home/anandan/Downloads/1989communicationletters.har", function (err, data) {
-
+fs.readFile("C:/Users/anand/Downloads/accounts1.har", function (err, data) {
     // Check for errors 
     if (err) throw err;
 
@@ -29,17 +28,25 @@ fs.readFile("/home/anandan/Downloads/1989communicationletters.har", function (er
     result = result.filter(e => !e.startsWith('{\"prompt'));
     console.log(result);
 
+    const translation = 'translation';
+    const transcription = 'transcription';
+
+    if (!fs.existsSync(translation)) {
+        fs.mkdirSync(translation, { recursive: true });
+        console.log('creating folder ', translation);
+    }
+    if (!fs.existsSync(transcription)) {
+        fs.mkdirSync(transcription, { recursive: true });
+        console.log('creating folder', transcription);
+    }
     result = result.map((e, index) => {
         let filename;
         if (e.startsWith("------WebKitFormBoundary")) {
             filename = e.split("filename=\"")[1].split("\"\r\nContent-Type:")[0];
             console.log('FileName:', filename, "\n Tamil", result[index + 1], "\n English", result[index + 2]);
             console.log('*****************************************************************************');
-            fs.writeFileSync(filename + "_transcription.txt", result[index + 1]);
-            fs.writeFileSync(filename + "_translation.txt", result[index + 2]);
-
+            fs.writeFileSync(transcription + "/" + filename + "_transcription.txt", result[index + 1]);
+            fs.writeFileSync(translation + "/" + filename + "_translation.txt", result[index + 2]);
         }
     });
-
-
 });
