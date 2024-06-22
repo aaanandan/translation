@@ -8,7 +8,9 @@ const { PDFImage } = require("pdf-image");
 const { DOMParser } = require('xmldom');
 const xpath = require('xpath');
 const officeParser = require('officeparser');
-const emlformat = require('eml-format');
+const  EmlParser = require('eml-parser');
+const { convert } = require('html-to-text');
+
 
 const FOLDER_ID_OR_PATH = process.env.FOLDER_ID_OR_PATH;
 const IS_LOCAL = process.env.IS_LOCAL === 'true';
@@ -18,7 +20,7 @@ const RESUME_FILE_PATH = './resume.json'; // Path to store resume data
 
 
 const SUPPORTED_FILE_TYPES = ['.jpg', '.jpeg', '.png', '.pdf', '.doc', '.docx','.webp', '.eml','pptx','xlsx'];
-// const SUPPORTED_FILE_TYPES = ['.jpg', '.jpeg', '.png'];
+// const SUPPORTED_FILE_TYPES = ['.eml'];
 const LANGUAGES = ['ta', 'en'];
 
 
@@ -114,6 +116,7 @@ async function extractText(filePath, fileType) {
         } else if (fileType === '.doc' || fileType === '.docx') {
             resultText = await extractTextFromWord(filePath, imageContext);
         } else if (fileType === '.eml'){
+
             resultText = await extractTextFromEml(filePath);
         }else{
             resultText = await extractTextFromImage(filePath, imageContext);
@@ -187,6 +190,7 @@ async function extractTextFromPdf(filePath, imageContext) {
             const imagePath = await pdfImage.convertPage(i);
             const [result] = await visionClient.textDetection({ image: { source: { filename: imagePath } }, imageContext });
             text += result.fullTextAnnotation ? result.fullTextAnnotation.text : '';
+            fs.unlink(imagePath);
         }
 
         return text;
@@ -196,16 +200,17 @@ async function extractTextFromPdf(filePath, imageContext) {
     }
 }
 
+const fsys = require('fs');
 // Function to extract text from an EML file
 async function extractTextFromEml(emlFilePath) {
     try {
-        const emlData = fs.readFileSync(emlFilePath, 'utf-8');
-        const parsed = await emlformat.read(emlData);
-
-        // Extract plain text from parsed EML
-        const text = parsed.text || '';
-
-        return text.trim(); // Trim any leading/trailing whitespace
+        const eml = new EmlParser(fsys.createReadStream(emlFilePath));
+        const htmlString  = await eml.getEmailAsHtml();
+        const options = {
+            wordwrap: 130,
+          };            
+          const text = convert(htmlString, options);
+        return text // Trim any leading/trailing whitespace
     } catch (error) {
         console.error('Error extracting text from EML:', error);
         return '';
@@ -352,7 +357,7 @@ async function updateSpreadsheet(auth, spreadsheetId, rows) {
     await drive.permissions.create({
         fileId: spreadsheetId,
         requestBody: {
-            role: 'reader',
+            role: 'writer',
             type: 'anyone'
         }
     });
