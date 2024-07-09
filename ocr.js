@@ -11,15 +11,22 @@ const officeParser = require('officeparser');
 const  EmlParser = require('eml-parser');
 const { convert } = require('html-to-text');
 
+const fsextra = require('fs-extra');
+const XLSX = require('xlsx');
+
+const fsys = require('fs');
+const {Translate} = require('@google-cloud/translate').v2;
+
 
 const FOLDER_ID_OR_PATH = process.env.FOLDER_ID_OR_PATH;
 const IS_LOCAL = process.env.IS_LOCAL === 'true';
 const TEMP_FOLDER_PATH = process.env.TEMP_FOLDER_PATH;
 const CREDENTIALS_JSON = process.env.CREDENTIALS_JSON;
 const RESUME_FILE_PATH = './resume.json'; // Path to store resume data
+const IS_TRANSLATION = process.env.IS_TRANSLATION === 'true';
 
 
-const SUPPORTED_FILE_TYPES = ['.jpg', '.jpeg', '.png', '.pdf', '.doc', '.docx','.webp', '.eml','pptx','xlsx'];
+const SUPPORTED_FILE_TYPES = ['.jpg', '.jpeg', '.png', '.pdf', '.doc', '.docx','.webp', '.eml','.pptx','.xlsx'];
 // const SUPPORTED_FILE_TYPES = ['.eml'];
 const LANGUAGES = ['ta', 'en'];
 
@@ -200,7 +207,6 @@ async function extractTextFromPdf(filePath, imageContext) {
     }
 }
 
-const fsys = require('fs');
 // Function to extract text from an EML file
 async function extractTextFromEml(emlFilePath) {
     try {
@@ -247,27 +253,26 @@ async function createSpreadsheet(auth, title) {
 }
 
 // Main function to process files
-async function processFiles(folderIdOrPath, isLocal = false) {
+async function processFiles(folderIdOrPath, isLocal = false, isTranslation=false) {
     const auth = await authenticate();
-    const resumeData = await loadResumeData();
-    const { currentFileIndex } = resumeData;
 
-    const spreadsheetId = await createSpreadsheet(auth, 'OCR Process Log');
+
+    // const spreadsheetId = await createSpreadsheet(auth, 'OCR Process Log');
     let filesToProcess = [];
-    const rows = [];
-    let row;
-    let totalFilesProcessed = 0;
 
     if (isLocal) {
         // Process local folder
         async function traverseLocalFolder(currentPath) {
+            console.log(currentPath, filesToProcess.length);
             const entries = await fs.readdir(currentPath, { withFileTypes: true });
             for (const entry of entries) {
                 const fullPath = path.join(currentPath, entry.name);
                 if (entry.isDirectory()) {
+
                     await traverseLocalFolder(fullPath);
                 } else {
                     filesToProcess.push({ path: fullPath, name: entry.name });
+
                 }
             }
         }
@@ -278,7 +283,20 @@ async function processFiles(folderIdOrPath, isLocal = false) {
         filesToProcess = await listFilesFromDrive(auth, folderIdOrPath);
     }
 
-    console.log(`Total files to process: ${filesToProcess.length}`);
+    // console.log(filesToProcess.length, isLocal,isTranslation);
+    await processFileEntries(filesToProcess, isLocal,isTranslation);
+    console.log('Processing completed!');
+}
+
+async function processFileEntries(filesToProcess,  isLocal, isTranslation=false) {
+    let row;
+    const rows = [];
+    let totalFilesProcessed = 0;
+    const resumeData = await loadResumeData();
+    const { currentFileIndex } = resumeData;
+    const auth = await authenticate();
+
+    console.log(`Total files to process: ${filesToProcess.length + currentFileIndex}`);
 
     for (let i = currentFileIndex; i < filesToProcess.length; i++) {
         const file = filesToProcess[i];
@@ -291,12 +309,14 @@ async function processFiles(folderIdOrPath, isLocal = false) {
                 DestinationPath: '',
                 TextLength: 0,
                 Status: 'Skipped - Unsupported file type',
-            }
+            };
             rows.push(row);
             continue;
         }
 
-        const destFilePath = path.join(TEMP_FOLDER_PATH, file.path.replace(/\.[^/.]+$/, ext+'.txt'));
+        let destFilePath;
+        if(isTranslation) destFilePath = path.join(TEMP_FOLDER_PATH, file.path.replace(/\.[^/.]+$/, ext + '_translated_en.txt'));
+        else destFilePath = path.join(TEMP_FOLDER_PATH, file.path.replace(/\.[^/.]+$/, ext + '.txt'));
         await createLocalFolder(path.dirname(destFilePath));
 
         if (!isLocal) {
@@ -308,23 +328,24 @@ async function processFiles(folderIdOrPath, isLocal = false) {
                     DestinationPath: '',
                     TextLength: 0,
                     Status: 'Error - Download failed',
-                }
+                };
                 rows.push(row);
                 continue;
             }
         }
 
-        const extractedText = await extractText(file.path,ext);
-        const textLength = extractedText.length;
-
-        await fs.writeFile(destFilePath, extractedText);
+        
+        const processedText = isTranslation ? await  translateFile(file.path):await extractText(file.path, ext);
+        const textLength = processedText.length;
+        // console.log(isTranslation, processedText);
+        await fs.writeFile(destFilePath, processedText);
         row = {
             FileName: file.name,
             SourcePath: file.path,
             DestinationPath: destFilePath,
             TextLength: textLength,
             Status: 'Processed',
-        }
+        };
         rows.push(row);
         totalFilesProcessed++;
 
@@ -332,10 +353,12 @@ async function processFiles(folderIdOrPath, isLocal = false) {
         resumeData.currentFileIndex = i + 1;
         await saveResumeData(resumeData);
 
-        console.log(`Processed file: ${file.name} (${totalFilesProcessed}/${filesToProcess.length})`);
+        console.log(`Processed file: ${file.name} (${totalFilesProcessed}/${filesToProcess.length})`,file);
     }
-    await updateSpreadsheet(auth, spreadsheetId, rows);
-    console.log('Processing completed!');
+
+    // await updateSpreadsheet(auth, spreadsheetId, rows);
+    // return { row, totalFilesProcessed };
+    // fs.writeFile('processlogs.txt',rows);
 }
 
 // Update Google Sheets
@@ -365,4 +388,96 @@ async function updateSpreadsheet(auth, spreadsheetId, rows) {
     console.log(`Spreadsheet is now publicly accessible: https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`);
 }
 
-processFiles(FOLDER_ID_OR_PATH, IS_LOCAL).catch(console.error);
+// Set your source and destination directories here
+const sourceDir =  FOLDER_ID_OR_PATH; //'/home/anandan/Downloads/swargapuramAdheenam'
+const destinationDir = TEMP_FOLDER_PATH ; //'/media/anandan/3c065730-66a3-4ff2-a443-573d6d52ba8c/home/anandan/code/translation/downloads/FINAL SWARGAPURAM ADHEENAM DOC_SEGREGATED FOLDER WISE/home/anandan/Downloads/swargapuramAdheenam'
+
+// Function to get all files recursively from a directory
+function getFilesRecursively(directory) {
+    const files = [];
+
+    function readDirectory(directory) {
+        fsextra.readdirSync(directory).forEach(file => {
+            const fullPath = path.join(directory, file);
+            if (fsextra.lstatSync(fullPath).isDirectory()) {
+                readDirectory(fullPath);
+            } else {
+                files.push(fullPath);
+            }
+        });
+    }
+    readDirectory(directory);
+    //console.log(directory,files);
+    return files;
+}
+
+// Function to prepare the report
+async function prepareReport(sourceDir, destinationDir) {
+    let filesToProcess = [];
+    
+    const sourceFiles = getFilesRecursively(sourceDir);
+    const destinationFiles = getFilesRecursively(destinationDir);
+
+    const destinationFileMap = new Map();
+    destinationFiles.forEach(file => {
+        destinationFileMap.set(path.basename(file), file);
+    });
+
+    const data = [
+        ['FileName', 'SourcePath', 'DestinationPath', 'TextLength', 'Status']
+    ];
+
+    sourceFiles.forEach(sourceFile => {
+        const fileName = path.basename(sourceFile);
+        const destinationFileName = destinationFileMap.get(fileName+".txt");
+        const textLength = destinationFileName ? fsextra.statSync(destinationFileName).size : 0;
+        const status = textLength>0 ? 'processed' : 'skipped';
+        if(status==='skipped'){
+            filesToProcess.push({ path: sourceFile, name: fileName});
+        }
+        data.push([fileName, sourceFile, destinationFileName || '', textLength, status]);
+    });
+
+    // Creating the worksheet and workbook
+    const worksheet = XLSX.utils.aoa_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Report');
+    // Writing the workbook to a file
+    XLSX.writeFile(workbook, 'ocr-report.xlsx');
+    console.log('processsign skipped files');
+    await processFileEntries(filesToProcess, true);
+}
+
+processFiles(FOLDER_ID_OR_PATH, IS_LOCAL, IS_TRANSLATION).catch(console.error);
+// prepareReport(sourceDir, destinationDir).then(() => {
+//     console.log('Report has been generated successfully.');
+// }).catch(err => {
+//     console.error('Error generating report:', err);
+// });
+
+// Creates a client
+const translate = new Translate();
+
+async function translateFile(filePath) {
+  try {
+    // Read the file content
+    const text = fs.readFileSync(filePath, 'utf8');
+
+    // Detect the language of the text
+    const [detection] = await translate.detect(text);
+    const language = detection.language;
+
+    // If the text is already in English, return it
+    if (language === 'en') {
+      return text;
+    }
+
+    // Translate the text to English
+    const [translation] = await translate.translate(text, 'en');
+    return translation;
+  } catch (error) {
+    console.error('Error translating file:', error);
+    throw error;
+  }
+}
+
