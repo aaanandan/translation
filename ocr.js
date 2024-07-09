@@ -15,7 +15,7 @@ const fsextra = require('fs-extra');
 const XLSX = require('xlsx');
 
 const fsys = require('fs');
-const {Translate} = require('@google-cloud/translate').v2;
+const { TranslationServiceClient } = require('@google-cloud/translate').v3;
 
 
 const FOLDER_ID_OR_PATH = process.env.FOLDER_ID_OR_PATH;
@@ -26,8 +26,9 @@ const RESUME_FILE_PATH = './resume.json'; // Path to store resume data
 const IS_TRANSLATION = process.env.IS_TRANSLATION === 'true';
 
 
-const SUPPORTED_FILE_TYPES = ['.jpg', '.jpeg', '.png', '.pdf', '.doc', '.docx','.webp', '.eml','.pptx','.xlsx'];
+// const SUPPORTED_FILE_TYPES = ['.jpg', '.jpeg', '.png', '.pdf', '.doc', '.docx','.webp', '.eml','.pptx','.xlsx'];
 // const SUPPORTED_FILE_TYPES = ['.eml'];
+const SUPPORTED_FILE_TYPES = ['.txt','.jpg.txt', '.jpeg.txt', '.png.txt', '.pdf.txt', '.doc.txt', '.docx.txt','.webp.txt', '.eml.txt','.pptx.txt','.xlsx.txt'];
 const LANGUAGES = ['ta', 'en'];
 
 
@@ -272,11 +273,9 @@ async function processFiles(folderIdOrPath, isLocal = false, isTranslation=false
                     await traverseLocalFolder(fullPath);
                 } else {
                     filesToProcess.push({ path: fullPath, name: entry.name });
-
                 }
             }
         }
-
         await traverseLocalFolder(folderIdOrPath);
     } else {
         // Process Google Drive folder
@@ -295,7 +294,7 @@ async function processFileEntries(filesToProcess,  isLocal, isTranslation=false)
     const resumeData = await loadResumeData();
     const { currentFileIndex } = resumeData;
     const auth = await authenticate();
-
+    totalFilesProcessed = currentFileIndex | 0;
     console.log(`Total files to process: ${filesToProcess.length + currentFileIndex}`);
 
     for (let i = currentFileIndex; i < filesToProcess.length; i++) {
@@ -445,7 +444,7 @@ async function prepareReport(sourceDir, destinationDir) {
     // Writing the workbook to a file
     XLSX.writeFile(workbook, 'ocr-report.xlsx');
     console.log('processsign skipped files');
-    await processFileEntries(filesToProcess, true);
+    // await processFileEntries(filesToProcess, true);
 }
 
 processFiles(FOLDER_ID_OR_PATH, IS_LOCAL, IS_TRANSLATION).catch(console.error);
@@ -455,29 +454,70 @@ processFiles(FOLDER_ID_OR_PATH, IS_LOCAL, IS_TRANSLATION).catch(console.error);
 //     console.error('Error generating report:', err);
 // });
 
-// Creates a client
-const translate = new Translate();
-
 async function translateFile(filePath) {
   try {
     // Read the file content
-    const text = fs.readFileSync(filePath, 'utf8');
+    const text = fsys.readFileSync(filePath, 'utf8');
 
-    // Detect the language of the text
-    const [detection] = await translate.detect(text);
-    const language = detection.language;
+    // Authenticate using service account credentials
+    const auth = await authenticate();
+    // console.log('projectid',auth.projectId);
+    const client = new TranslationServiceClient();
+    // const  client= new Translate({ projectId: auth.projectId })
+    // const detectedLanguage = await detectLanguage(text);
+    // console.log(`Detected language: ${detectedLanguage}`);
 
-    // If the text is already in English, return it
-    if (language === 'en') {
-      return text;
+    const translatedText = await translateToEnglish(text,'ta');
+    // console.log(`Translated text (English): ${translatedText}`);
+    // // Function to detect language
+    // async function detectLanguage(text) {
+    //     try {
+    //     const [detections] = await client.detectLanguage({
+    //         content: text,
+    //     });
+    //     return detections[0].languages[0].languageCode;
+    //     } catch (error) {
+            
+    //     console.error("Error detecting language:", error);
+    //     return "";
+
+    //     // throw error; // Re-throw for handling
+    //     }
+        
+    // }
+    // Function to translate to English
+    async function translateToEnglish(text,sourceLanguageCode) {
+    try {
+        // Construct request
+        const request = {
+            parent: `projects/${auth.projectId}/locations/global`,
+            contents: [text],
+            mimeType: 'text/plain', // mime types: text/plain, text/html
+            sourceLanguageCode: 'ta',
+            targetLanguageCode: 'en',
+        };
+
+        const [response] = await client.translateText(request);
+        
+        // console.log('response',response);
+        // console.log(`Translation: ${response.translations[0].translatedText}`,i);
+        // for (const translation of response.translations) {
+            // console.log(`Translation: ${translation.translatedText}`,i);
+        //   }
+
+        return response.translations[0].translatedText;
+    } catch (error) {
+        console.error("Error translating text:", error);
+        return "";
+        throw error; // Re-throw for handling
     }
+    }
+    // export GOOGLE_APPLICATION_CREDENTIALS=./creds.json
+    
 
-    // Translate the text to English
-    const [translation] = await translate.translate(text, 'en');
-    return translation;
-  } catch (error) {
-    console.error('Error translating file:', error);
-    throw error;
+    return translatedText;
+} catch (error) {
+    console.error("An error occurred:", error);
   }
-}
 
+} 
